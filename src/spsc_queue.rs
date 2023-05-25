@@ -4,12 +4,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use crossbeam_utils::CachePadded;
 
-pub fn is_power_of_two(num: usize) -> bool {
+pub fn is_power_of_two(num: i64) -> bool {
     return (num & (num - 1)) == 0;
 }
 
-pub fn next_power_of_two(num: usize) -> usize {
-    let mut v: usize = num;
+pub fn next_power_of_two(num: i64) -> i64 {
+    let mut v: i64 = num;
     v -= 1;
     v |= v >> 1;
     v |= v >> 2;
@@ -21,7 +21,7 @@ pub fn next_power_of_two(num: usize) -> usize {
     return v;
 }
 
-pub fn new<T>(cap: usize) -> (Pub<T>, Sub<T>) {
+pub fn new<T: Send + Sync>(cap: i64) -> (Pub<T>, Sub<T>) {
     let rb = RingBuffer::<T>::new(cap);
     let arc = Arc::new(rb);
     let arc_sender = arc.clone();
@@ -29,15 +29,15 @@ pub fn new<T>(cap: usize) -> (Pub<T>, Sub<T>) {
     return (Pub { rb: arc_sender }, Sub { rb: arc });
 }
 
-pub struct Pub<T> {
+pub struct Pub<T: Send + Sync> {
     rb: Arc<RingBuffer<T>>
 }
 
-pub struct Sub<T> {
+pub struct Sub<T: Send + Sync> {
     rb: Arc<RingBuffer<T>>
 }
 
-impl<T> Sub<T> {
+impl<T: Send + Sync> Sub<T> {
     pub fn batch_recv<F: FnMut(T)> (&self, handler: &mut F) {
         let raw_ptr = Arc::as_ptr(&self.rb) as *mut RingBuffer<T>;
         unsafe {
@@ -46,7 +46,7 @@ impl<T> Sub<T> {
     }
 }
 
-impl<T> Pub<T> {
+impl<T: Send + Sync> Pub<T> {
     pub fn get_raw_ptr(&self) -> *mut RingBuffer<T> {
         return Arc::as_ptr(&self.rb) as *mut RingBuffer<T>;
     } 
@@ -59,10 +59,10 @@ impl<T> Pub<T> {
     }
 }
 
-pub struct RingBuffer<T> {
+pub struct RingBuffer<T: Send + Sync> {
     slots: Vec<Option<T>>,
-    capacity: usize,
-    consumer_write_idx_cache: CachePadded<i64>,      // Need atomic
+    capacity: i64,
+    // consumer_write_idx_cache: CachePadded<i64>,      // Need atomic
     consumer_read_idx_cache: CachePadded<i64>,       // Don't need atomic caused it's single thread
     producer_write_idx_cache: CachePadded<i64>,      // Don't need atomic caused it's single thread
     producer_read_idx_cache: CachePadded<i64>,       // Need atomic
@@ -70,8 +70,8 @@ pub struct RingBuffer<T> {
     read_idx: CachePadded<AtomicI64>
 }
 
-impl<T> RingBuffer<T> {
-    pub fn new(cap: usize) -> Self {
+impl<T: Send + Sync> RingBuffer<T> {
+    pub fn new(cap: i64) -> Self {
         let mut capacity = cap;
         if !is_power_of_two(cap) {
             capacity = next_power_of_two(capacity);
@@ -85,7 +85,6 @@ impl<T> RingBuffer<T> {
         return RingBuffer {
             slots: vec,
             capacity: capacity,
-            consumer_write_idx_cache: CachePadded::new(0i64),
             consumer_read_idx_cache: CachePadded::new(0i64),
             producer_write_idx_cache: CachePadded::new(0i64),
             producer_read_idx_cache: CachePadded::new(0i64),
@@ -97,7 +96,7 @@ impl<T> RingBuffer<T> {
     fn push(&mut self, val: T) {
         let tmp_write_idx = self.producer_write_idx_cache.into_inner();
         let mut next_write_idx = tmp_write_idx + 1;
-        if next_write_idx == self.capacity as i64 {
+        if next_write_idx == self.capacity {
             next_write_idx = 0;
         }
 
@@ -128,7 +127,7 @@ impl<T> RingBuffer<T> {
             }
             
             tmp_idx += 1;
-            if tmp_idx == self.capacity as i64 {
+            if tmp_idx == self.capacity {
                 tmp_idx = 0;
             }
         }
@@ -154,12 +153,12 @@ impl<T> RingBuffer<T> {
         self.read_idx.store(read_idx, Ordering::Release);
     }
 
-    fn get_available_read(&self) -> usize {
+    fn get_available_read(&self) -> i64 {
         let tmp_write_idx = self.write_idx.load(Ordering::Relaxed);
         let mut diff = tmp_write_idx - self.consumer_read_idx_cache.into_inner();
         if diff < 0 {
-            diff += self.capacity as i64;
+            diff += self.capacity;
         }
-        return diff as usize;
+        return diff as i64;
     }
 }

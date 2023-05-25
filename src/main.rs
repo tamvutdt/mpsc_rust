@@ -1,10 +1,11 @@
-
 pub mod spsc_queue;
+pub mod mpsc;
 
 use std::collections::BinaryHeap;
-use std::rc::{Rc, self};
+use std::ops::Deref;
+use std::rc::{Rc};
 use std::thread::{self, JoinHandle};
-use std::time::{Instant, UNIX_EPOCH, SystemTime, Duration};
+use std::time::{Instant, Duration};
 
 use crate::spsc_queue::{Pub, Sub};
 
@@ -20,7 +21,7 @@ struct TestLatency {
 
 fn test_spsc() {
     const N: i64 = 200_000_000;
-    const CAP: usize = 1024 * 1024;
+    const CAP: i64 = 1024 * 1024;
 
     println!("Total msg: {} - Total publisher: {} - Size per buffer: {}", N, 1, CAP);
 
@@ -28,7 +29,7 @@ fn test_spsc() {
     let p = thread::spawn(move || {
         let now = Instant::now();
         for i in 0..N {
-            tx.push(Test { val: i });
+            tx.push(Test { val: i});
         }
         let elapsed = now.elapsed();
         println!("Push elapsed: {:?}", elapsed);
@@ -58,10 +59,10 @@ fn test_spsc() {
 }
 
 fn test_mpsc() {
-    const N: i64 = 800_000_000;
-    const CAP: usize = 1024 * 1024;
-    const NUM_PUB: i64 = 4;
-    const INTERVAL: i64 = N / NUM_PUB;
+    const CAP: i64 = 1024 * 1024;
+    const NUM_PUB: i64 = 3;
+    const INTERVAL: i64 = 300_000_000;
+    const N: i64 = NUM_PUB * INTERVAL;
 
     println!("Total msg: {} - Total publisher: {} - Size per buffer: {}", N, NUM_PUB, CAP);
 
@@ -117,7 +118,7 @@ fn test_mpsc() {
 
 fn test_latency() {
     const N: i64 = 100;
-    const CAP: usize = 1024 * 1024;
+    const CAP: i64 = 1024 * 1024;
     const NUM_PUB: i64 = 1;
     const INTERVAL: i64 = N / NUM_PUB;
 
@@ -162,7 +163,7 @@ fn test_latency() {
         unsafe {
             *ptr += 1;
             if nano != 0 {
-                *ptr_total_latency += (nano - ret.time);
+                *ptr_total_latency += nano - ret.time;
                 *ptr_total_latency_count += 1;
             }
         }
@@ -193,7 +194,7 @@ fn test_latency() {
 
 fn test_sort() {
     const N: i64 = 100;
-    const CAP: usize = 8;
+    const CAP: i64 = 8;
     const NUM_PUB: i64 = 1;
     const INTERVAL: i64 = N / NUM_PUB;
 
@@ -264,8 +265,57 @@ fn test_sort() {
     }
 }
 
+fn test_mpsc_new() {
+    const NUM_PUB: i64 = 3;
+    const INTERVAL: i64 = 330_000_000;
+    const N: i64 = NUM_PUB * INTERVAL;
+    const CAP: i64 = 1024 * 1024;
+
+    println!("Total msg: {} - Total publisher: {} - Size per buffer: {}", N, NUM_PUB, CAP);
+
+    let mut queue = mpsc::MPSC::<Test>::new(CAP);
+    let mut handles = Vec::<JoinHandle<()>>::new();
+
+    for _i in 0..NUM_PUB {
+        let tx = queue.get_publisher();
+        let handle = thread::spawn(move || {
+            for j in 0..INTERVAL {
+                tx.push(Test { val: j });
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    let count: Rc<i64> = Rc::new(0);
+    let tmp = count.clone();
+    let mut msg_handler = { move |ret: Test| {
+        // println!("ret: {:?}", ret.val);
+        let ptr = Rc::as_ptr(&tmp) as *mut i64;
+        unsafe {
+            *ptr += 1;
+        }
+    }};
+
+    let subs = queue.get_borrowed_subscriber();
+    let now = Instant::now();
+    loop {
+        subs.batch_recv(&mut msg_handler);
+
+        if *count.deref() == N {
+            break;
+        }
+    }
+    let elapsed = now.elapsed();
+    println!("Recv elapsed time: {:?}", elapsed);
+
+    for t in handles {
+        t.join().expect("Unable to join");
+    }
+}
+
 fn main() {
     for _i in 0..10 {
-        test_mpsc()
+        test_mpsc_new()
     }
 }
