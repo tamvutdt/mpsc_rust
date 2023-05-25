@@ -1,13 +1,36 @@
+/*
+Copyright (c) 2023 Tam Vu <tamvu@tdt.asia>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+ */
 
 use std::ops::{DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use crossbeam_utils::CachePadded;
 
+/// Check is power of two
 pub fn is_power_of_two(num: i64) -> bool {
     return (num & (num - 1)) == 0;
 }
 
+/// Find next power of two
 pub fn next_power_of_two(num: i64) -> i64 {
     let mut v: i64 = num;
     v -= 1;
@@ -38,6 +61,7 @@ pub struct Sub<T: Send + Sync> {
 }
 
 impl<T: Send + Sync> Sub<T> {
+    /// Batch recv with handler
     pub fn batch_recv<F: FnMut(T)> (&self, handler: &mut F) {
         let raw_ptr = Arc::as_ptr(&self.rb) as *mut RingBuffer<T>;
         unsafe {
@@ -47,9 +71,10 @@ impl<T: Send + Sync> Sub<T> {
 }
 
 impl<T: Send + Sync> Pub<T> {
+    /// Get raw pointer of RingBuffer
     pub fn get_raw_ptr(&self) -> *mut RingBuffer<T> {
         return Arc::as_ptr(&self.rb) as *mut RingBuffer<T>;
-    } 
+    }
 
     pub fn push(&self, val: T) {
         let raw_ptr = Arc::as_ptr(&self.rb) as *mut RingBuffer<T>;
@@ -62,7 +87,6 @@ impl<T: Send + Sync> Pub<T> {
 pub struct RingBuffer<T: Send + Sync> {
     slots: Vec<Option<T>>,
     capacity: i64,
-    // consumer_write_idx_cache: CachePadded<i64>,      // Need atomic
     consumer_read_idx_cache: CachePadded<i64>,       // Don't need atomic caused it's single thread
     producer_write_idx_cache: CachePadded<i64>,      // Don't need atomic caused it's single thread
     producer_read_idx_cache: CachePadded<i64>,       // Need atomic
@@ -72,9 +96,11 @@ pub struct RingBuffer<T: Send + Sync> {
 
 impl<T: Send + Sync> RingBuffer<T> {
     pub fn new(cap: i64) -> Self {
+        const DEFAULT_CAPACITY: i64 = 1024;
+
         let mut capacity = cap;
-        if !is_power_of_two(cap) {
-            capacity = next_power_of_two(capacity);
+        if capacity <= 0 {
+            capacity = DEFAULT_CAPACITY;
         }
 
         let mut vec = Vec::<Option<T>>::new();
