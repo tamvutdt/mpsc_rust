@@ -180,7 +180,7 @@ impl<T: Send + Sync> RingBuffer<T> {
     }
 
     fn get_available_read(&self) -> i64 {
-        let tmp_write_idx = self.write_idx.load(Ordering::Relaxed);
+        let tmp_write_idx = self.write_idx.load(Ordering::Acquire);
         let mut diff = tmp_write_idx - self.consumer_read_idx_cache.into_inner();
         if diff < 0 {
             diff += self.capacity;
